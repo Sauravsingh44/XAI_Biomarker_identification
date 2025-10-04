@@ -1,8 +1,4 @@
----
-Title: "XAI_Biomarker_identification"
-output:
-  pdf_document
----
+
 # set directory
 ```{r}
 setwd("D:/upes/sem6/Minor2/Previous work/minorXAI/final_expression_dataset")
@@ -392,10 +388,12 @@ print(top_10_genes_table)  # Print formatted table
 write.csv(top_10_genes_table, "Top_10_Genes.csv", row.names = FALSE)
 ```
 
+# upregulated and downregulated
+
 ```{r}
 # Filter significant upregulated and downregulated genes
-upregulated_genes <- mydata[mydata$logFC > 0 & mydata$adj.P.Val < 0.05, ]  # Significant upregulated genes
-downregulated_genes <- mydata[mydata$logFC < 0 & mydata$adj.P.Val < 0.05, ]  # Significant downregulated genes
+upregulated_genes <- mydata[mydata$logFC > 0.5 & mydata$adj.P.Val < 0.05, ]  # Significant upregulated genes
+downregulated_genes <- mydata[mydata$logFC < -0.5 & mydata$adj.P.Val < 0.05, ]  # Significant downregulated genes
 ```
 
 ```{r}
@@ -417,6 +415,85 @@ print("Top 10 Downregulated Genes:")
 print(top_10_downregulated[, c("SYMBOL", "logFC", "adj.P.Val")])
 ```
 
+```{r}
+# Number of upregulated genes
+num_upregulated <- nrow(upregulated_genes)
+cat("Number of upregulated genes:", num_upregulated, "\n")
+
+# Number of downregulated genes
+num_downregulated <- nrow(downregulated_genes)
+cat("Number of downregulated genes:", num_downregulated, "\n")
+
+
+```
+
+```{r}
+total_DEGs <- num_upregulated + num_downregulated
+cat("Total number of DEGs:", total_DEGs, "\n")
+
+```
+
+```{r}
+library(EnhancedVolcano)
+
+EnhancedVolcano(table,
+    lab = table$SYMBOL,
+    x = "logFC",
+    y = "adj.P.Val",
+    pCutoff = 0.05,
+    FCcutoff = 0.5,
+    title = "Volcano Plot: Cancer vs Normal",
+    subtitle = "logFC > 0.5 or < -0.5; adj.P.Val < 0.05"
+)
+
+```
+
+```{r}
+# Assuming you've already filtered them
+upregulated_genes <- table[table$logFC > 0.5 & table$adj.P.Val < 0.05, ]
+downregulated_genes <- table[table$logFC < -0.5 & table$adj.P.Val < 0.05, ]
+
+
+```
+```{r}
+# Add CONDITION column
+upregulated_genes$CONDITION <- 1
+downregulated_genes$CONDITION <- 0
+
+# Combine both into one data frame
+combined_genes <- rbind(upregulated_genes, downregulated_genes)
+
+# Save to a single CSV file
+write.csv(combined_genes, file = "combined_DEGs.csv", row.names = FALSE)
+
+```
+
+```{r}
+library(oligo)
+
+# Normalize using RMA
+norm_data <- rma(raw_data)
+
+# Extract expression matrix
+expr_matrix <- exprs(norm_data)  # rows = genes/probes, columns = samples
+
+
+```
+
+
+```{r}
+expr_df <- as.data.frame(t(expr_matrix))  # Now: rows = samples, columns = genes
+# Check SDRF columns
+colnames(pData(norm_data))
+```
+
+```{r}
+expr_df$Condition <- pData(norm_data)$Factor.Value.disease.
+write.csv(expr_df, "expression_data_with_labels.csv", row.names = TRUE)
+
+```
+
+#---------- bad code------- #
 ```{r}
 # Read the CSV file (adjust the file path if necessary)
 full_results_table <- read.csv("full_results_table.csv", header = TRUE, row.names = 1)
@@ -452,7 +529,7 @@ ego <- enrichGO(gene         = gene.df$ENTREZID,
                 pAdjustMethod= "BH",
                 pvalueCutoff = 0.05,
                 qvalueCutoff = 0.05)
-barplot(ego, showCategory = 15, title = "GO BP Enrichment")
+barplot(ego, showCategory = 10, title = "GO BP Enrichment")
 
 
 
@@ -464,7 +541,7 @@ ekegg <- enrichKEGG(gene         = gene.df$ENTREZID,
                     organism     = 'hsa',
                     pvalueCutoff = 0.05)
 
-barplot(ekegg, showCategory = 15, title = "KEGG Pathway Enrichment")
+barplot(ekegg, showCategory = 10, title = "KEGG Pathway Enrichment")
 
 
 ```
@@ -499,415 +576,6 @@ plot(ppi_graph, vertex.label = NA, vertex.size = 5, main = "PPI Network (STRING)
 
 ```
 
-```{r}
-library(STRINGdb)
-library(org.Hs.eg.db)   # change if not human
-library(tidyverse)
-library(igraph)
-
-# 1. Read in your DEG table
-deg <- read_csv("finalize_table1_unique.csv")
-
-# 2. Filter for significant DEGs
-deg_filt <- deg %>%
-  filter(ADJ.P.VAL < 0.05, abs(LOGFC) >= 1) %>%
-  select(SYMBOL, LOGFC, ADJ.P.VAL)
-
-deg_simple <- deg_filt %>%
-  as.data.frame() %>%        # drop tibble attributes
-  select(SYMBOL) %>%
-  rename(gene = SYMBOL)
-
-string_db <- STRINGdb$new(
-  version         = "11",
-  species         = 9606,
-  score_threshold = 400,
-  input_directory = ""
-)
-
-mapping <- string_db$map(
-  deg_simple,
-  "gene",              # use straight quotes!
-  removeUnmappedRows = TRUE
-)
-
-deg_mapped <- deg_filt %>%
-  as.data.frame() %>%
-  inner_join(mapping, by = c("SYMBOL" = "gene"))
-
-edges <- string_db$get_interactions(deg_mapped$STRING_id)
-
-g <- graph_from_data_frame(
-  d = edges,   # uses columns from/to/combined_score
-  vertices = deg_mapped %>%
-    transmute(
-      id    = STRING_id,
-      label = SYMBOL,
-      logfc = LOGFC
-    ),
-  directed = FALSE
-)
-
-```
-
-
-```{r}
-V(g)$color <- ifelse(V(g)$logfc > 0, "firebrick", "dodgerblue")
-V(g)$size  <- rescale(abs(V(g)$logfc), to = c(5, 15))
-
-plot(
-  g,
-  vertex.label     = V(g)$label,
-  vertex.label.cex = 0.8,
-  edge.width       = E(g)$combined_score / 200,
-  main             = "PPI Network of DEGs"
-)
-
-```
-
-```{r}
-library(igraph)
-library(scales)
-
-# 1. Pick a reproducible, nicer layout
-set.seed(42)
-L <- layout_with_fr(g)
-
-# 2. Style your nodes & edges
-V(g)$color <- ifelse(V(g)$logfc > 0, "firebrick", "dodgerblue")
-V(g)$size  <- rescale(abs(V(g)$logfc), to = c(5, 15))
-E(g)$alpha <- E(g)$combined_score / max(E(g)$combined_score)  # [0–1]
-
-# 3. Open a PNG device at higher res (optional)
-png("ppi_network.png", width=8, height=8, units="in", res=300)
-
-# 4. Plot with some label distancing & transparency
-plot(
-  g,
-  layout            = L,
-  vertex.label      = V(g)$label,
-  vertex.label.cex  = 0.8,
-  vertex.label.dist = 1.2,           # pushes labels out from nodes
-  edge.width        = E(g)$combined_score / 200,
-  edge.color        = rgb(0, 0, 0, alpha = E(g)$alpha),
-  vertex.frame.color= NA,            # no border
-  margin            = c(0,0,0,0),
-  main              = "PPI Network of DEGs"
-)
-
-dev.off()
-
-```
-
-```{r}
-# install.packages(c("ggraph","ggrepel","tidygraph"))
-library(tidygraph)
-library(ggraph)
-library(ggrepel)
-library(ggplot2)
-
-# Convert igraph → tbl_graph
-tg <- as_tbl_graph(g)
-
-# Plot
-ggraph(tg, layout = "fr") +
-  # edges
-  geom_edge_link(aes(width = combined_score),
-                 alpha = 0.3) +
-  # nodes
-  geom_node_point(aes(size = abs(logfc), color = logfc)) +
-  # labels with repel
-  geom_node_text(aes(label = label),
-                 repel = TRUE,
-                 size = 3) +
-  scale_color_gradient2(low = "dodgerblue", mid = "grey90", high = "firebrick",
-                        midpoint = 0, name = "log₂FC") +
-  scale_size_continuous(range = c(3, 8), name = "|log₂FC|") +
-  scale_edge_width(range = c(0.2, 1.5), name = "STRING score") +
-  theme_void() +
-  ggtitle("PPI Network of DEGs") +
-  theme(
-    legend.position = "right",
-    plot.title = element_text(hjust = 0.5)
-  )
-
-```
-
-```{r}
-library(STRINGdb)
-library(org.Hs.eg.db)
-library(tidyverse)
-library(igraph)
-
-# 1. Read in your DEG table
-deg1 <- read_csv("Finalize_table1.csv")
-
-# 2. Filter for significant DEGs
-deg_filt1 <- deg1 %>%
-  filter(adj.P.Val < 0.05, abs(logFC) >= 1) %>%
-  select(SYMBOL, logFC, adj.P.Val)
-
-# 3. Prepare a simple gene list
-deg_simple1 <- deg_filt1 %>%
-  as.data.frame() %>%
-  select(SYMBOL) %>%
-  rename(gene = SYMBOL)
-
-# 4. Initialize STRINGdb
-string_db1 <- STRINGdb$new(
-  version         = "11",
-  species         = 9606,
-  score_threshold = 400,
-  input_directory = ""
-)
-
-# 5. Map to STRING IDs
-mapping1 <- string_db1$map(
-  deg_simple1,
-  "gene",
-  removeUnmappedRows = TRUE
-)
-
-# 6. JOIN using the *same* mapping object
-deg_mapped1 <- deg_filt1 %>%
-  as.data.frame() %>%
-  inner_join(mapping1, by = c("SYMBOL" = "gene"))
-# ↑ you had `mapping` there; it must be `mapping1`
-
-# 7. Pull interactions for your mapped STRING_ids
-edges1 <- string_db1$get_interactions(deg_mapped1$STRING_id)
-
-# 8. Inspect your edges object!
-#    Make sure it has rows and columns “from”, “to”, “combined_score”
-print(dim(edges1))
-print(colnames(edges1))
-
-vertices1 <- deg_mapped1 %>%
-  transmute(
-    id    = STRING_id,
-    label = SYMBOL,
-    logfc = logFC
-  ) %>%
-  distinct(id, .keep_all = TRUE)
-
-g1 <- graph_from_data_frame(
-  d        = edges1,
-  vertices = vertices1,
-  directed = FALSE
-)
-
-
-
-```
-
-```{r}
-library(igraph)
-library(scales)
-
-# 1. Compute a reproducible layout
-set.seed(42)
-L1 <- layout_with_fr(g1)
-
-# 2. Style nodes
-V(g1)$color <- ifelse(V(g1)$logfc > 0, "firebrick", "dodgerblue")
-V(g1)$size  <- rescale(abs(V(g1)$logfc), to = c(5, 15))
-
-# 3. Style edges (alpha transparency proportional to combined_score)
-E(g1)$alpha <- E(g1)$combined_score / max(E(g1)$combined_score, na.rm = TRUE)
-
-# 4. Save high‑res PNG
-png("ppi_network_g1.png", width = 8, height = 8, units = "in", res = 300)
-
-# 5. Plot with layout, label distancing, and transparency
-plot(
-  g1,
-  layout            = L1,
-  vertex.label      = V(g1)$label,
-  vertex.label.cex  = 0.8,
-  vertex.label.dist = 1.2,
-  edge.width        = E(g1)$combined_score / 200,
-  edge.color        = rgb(0, 0, 0, alpha = E(g1)$alpha),
-  vertex.frame.color= NA,
-  margin            = c(0, 0, 0, 0),
-  main              = "PPI Network of DEGs (g1)"
-)
-
-dev.off()
-
-
-```
-
-```{r}
-# Compute degree (number of connections) for each node
-deg_cent <- degree(g1, mode = "all")
-
-# Create a data.frame of node → degree
-hub_df <- data.frame(
-  STRING_id = names(deg_cent),
-  degree    = deg_cent
-) %>%
-  arrange(desc(degree)) %>%
-  # attach the gene labels
-  left_join(
-    as_data_frame(g1, what = "vertices") %>% select(name, label),
-    by = c("STRING_id" = "name")
-  )
-
-# View top 10 hubs
-head(hub_df, 10)
-
-```
-
-```{r}
-# Betweenness centrality
-betw_cent <- betweenness(g1)
-# Closeness centrality
-close_cent <- closeness(g1)
-
-centrality_df <- data.frame(
-  STRING_id       = names(deg_cent),
-  degree          = deg_cent,
-  betweenness     = betw_cent,
-  closeness       = close_cent
-) %>%
-  left_join(
-    as_data_frame(g1, what = "vertices") %>% select(name, label),
-    by = c("STRING_id" = "name")
-  )
-
-# View top by betweenness (possible bottlenecks)
-centrality_df %>% arrange(desc(betweenness)) %>% head(10)
-
-```
-
-```{r}
-# Assuming your hub_df has columns STRING_id, degree, label:
-top_hubs <- hub_df %>%
-  filter(degree > 0) %>%
-  arrange(desc(degree))
-
-print(top_hubs)
-
-```
-
-```{r}
-# Get the STRING IDs of top hubs
-hub_ids <- top_hubs$STRING_id
-
-# Subgraph containing hubs and any edges between them
-sub_g <- induced_subgraph(g1, vids = hub_ids)
-
-# Plot it
-plot(
-  sub_g,
-  vertex.label = V(sub_g)$label,
-  vertex.color = ifelse(V(sub_g)$logfc > 0, "firebrick", "dodgerblue"),
-  vertex.size  = rescale(abs(V(sub_g)$logfc), to = c(5,15)),
-  edge.width   = E(sub_g)$combined_score / 200,
-  main         = "Subnetwork of Hub Proteins"
-)
-
-```
-
-```{r}
-library(clusterProfiler)
-library(org.Hs.eg.db)
-
-# 1. Take the hub gene symbols
-hub_symbols <- top_hubs$label
-
-# 2. Map SYMBOL → ENTREZID
-entrez_map_hubs <- bitr(
-  hub_symbols,
-  fromType = "SYMBOL",
-  toType   = "ENTREZID",
-  OrgDb    = org.Hs.eg.db,
-  drop     = TRUE
-)
-
-# Inspect mapping
-print(entrez_map_hubs)
-
-```
-
-```{r}
-# 3. GO BP enrichment
-ego_hubs <- enrichGO(
-  gene          = entrez_map_hubs$ENTREZID,
-  OrgDb         = org.Hs.eg.db,
-  keyType       = "ENTREZID",
-  ont           = "BP",
-  pAdjustMethod = "BH",
-  pvalueCutoff  = 0.05,
-  qvalueCutoff  = 0.2
-)
-
-# 4. View and plot
-head(as.data.frame(ego_hubs), 5)
-barplot(ego_hubs, showCategory = 5, title = "GO BP Enrichment of Hub Proteins")
-
-```
-
-```{r}
-# 1. Load libraries
-library(clusterProfiler)
-library(org.Hs.eg.db)   # human
-library(tidyverse)
-
-# 2. Define your hub symbols (from your previous top_hubs table)
-hub_symbols <- top_hubs$label
-# e.g. c("TNFAIP6", "IDO1")
-
-# 3. Map SYMBOL → ENTREZID
-entrez_map_hubs <- bitr(
-  hub_symbols,
-  fromType = "SYMBOL",
-  toType   = "ENTREZID",
-  OrgDb    = org.Hs.eg.db,
-  drop     = TRUE
-)
-
-# 4. Prepare vector of ENTREZIDs
-hub_entrez <- entrez_map_hubs$ENTREZID
-
-# 5. Run KEGG enrichment
-#    Note: organism = "hsa" for human
-kegg_res <- enrichKEGG(
-  gene         = hub_entrez,
-  organism     = "hsa",
-  keyType      = "ncbi-geneid",
-  pvalueCutoff = 0.05,
-  qvalueCutoff = 0.2
-)
-
-# 6. Inspect results
-kegg_df <- as.data.frame(kegg_res)
-print(head(kegg_df, 10))
-
-
-```
-
-
-```{r}
-# 7. Visualize top pathways
-#    Dotplot
-dotplot(
-  kegg_res,
-  showCategory = min(8, nrow(kegg_df)),
-  title        = "KEGG Pathway Enrichment of Hub Proteins"
-)
-
-```
-
-```{r}
-#    Or barplot
-barplot(
-  kegg_res,
-  showCategory = min(8, nrow(kegg_df)),
-  title        = "KEGG Pathway Enrichment of Hub Proteins"
-)
-```
-
 
 ##### new code for PPI
 ```{r}
@@ -916,19 +584,21 @@ library(org.Hs.eg.db)   # change if not human
 library(tidyverse)
 library(igraph)
 
-# 1. Read in your DEG table
-deg2 <- read_csv("finalize_table1_unique.csv")
+# 1. Read in the DEG table
+deg2 <- read_csv("combined_DEGs.csv")
 
-# 2. Filter for significant DEGs
+# 2. Filter for significant DEGs (adj.P.Val < 0.05, |logFC| >= 1)
 deg_filt2 <- deg2 %>%
-  filter(ADJ.P.VAL < 0.05, abs(LOGFC) >= 1) %>%
-  select(SYMBOL, LOGFC, ADJ.P.VAL)
+  filter(adj.P.Val < 0.05, abs(logFC) >= 1) %>%
+  select(SYMBOL, logFC, adj.P.Val)
 
+# 3. Prepare a simple gene list for STRING mapping
 deg_simple2 <- deg_filt2 %>%
-  as.data.frame() %>%        # drop tibble attributes
+  as.data.frame() %>%
   select(SYMBOL) %>%
   rename(gene = SYMBOL)
 
+# 4. Initialize STRINGdb
 string_db2 <- STRINGdb$new(
   version         = "11",
   species         = 9606,
@@ -936,90 +606,107 @@ string_db2 <- STRINGdb$new(
   input_directory = ""
 )
 
+# 5. Map gene symbols to STRING IDs
 mapping2 <- string_db2$map(
   deg_simple2,
-  "gene",              # use straight quotes!
+  "gene",  # ensure straight quotes
   removeUnmappedRows = TRUE
 )
 
+# 6. Merge mapping info with original DEG data
 deg_mapped2 <- deg_filt2 %>%
   as.data.frame() %>%
   inner_join(mapping2, by = c("SYMBOL" = "gene"))
 
+# 7. Get interaction edges between mapped genes
 edges2 <- string_db2$get_interactions(deg_mapped2$STRING_id)
 
+# 8. Remove duplicate vertices (based on STRING ID)
+vertices_unique <- deg_mapped2 %>%
+  transmute(
+    id    = STRING_id,
+    label = SYMBOL,
+    logfc = logFC
+  ) %>%
+  distinct(id, .keep_all = TRUE)
+
+# 9. Create igraph object from interaction data
 g2 <- graph_from_data_frame(
-  d = edges2,   # uses columns from/to/combined_score
-  vertices = deg_mapped2 %>%
-    transmute(
-      id    = STRING_id,
-      label = SYMBOL,
-      logfc = LOGFC
-    ),
+  d = edges2,
+  vertices = vertices_unique,
   directed = FALSE
 )
 ```
 
 ```{r}
+# 10. Add color and size based on logFC
+library(scales)  # for rescale()
+
 V(g2)$color <- ifelse(V(g2)$logfc > 0, "firebrick", "dodgerblue")
 V(g2)$size  <- rescale(abs(V(g2)$logfc), to = c(5, 15))
 
-plot(
-  g2,
-  vertex.label     = V(g2)$label,
-  vertex.label.cex = 0.8,
-  edge.width       = E(g2)$combined_score / 200,
-  main             = "PPI Network of DEGs"
-)
-
+# 11. Plot (optional)
+plot(g2,
+     vertex.label = V(g2)$label,
+     vertex.label.cex = 0.7,
+     main = "STRING PPI Network of Filtered DEGs")
 
 ```
 
 ```{r}
-# Compute degree (number of connections) for each node
+library(igraph)
+library(dplyr)
+
+# Compute degree for g2
 deg_cent2 <- degree(g2, mode = "all")
 
-# Create a data.frame of node → degree
-hub_df2 <- data.frame(
-  STRING_id = names(deg_cent2),
-  degree    = deg_cent2
-) %>%
-  arrange(desc(degree)) %>%
-  # attach the gene labels
-  left_join(
-    as_data_frame(g1, what = "vertices") %>% select(name, label),
-    by = c("STRING_id" = "name")
-  )
+# Extract vertex metadata from g2
+vertex_df2 <- data.frame(
+  name  = V(g2)$name,
+  label = V(g2)$label
+)
+
+# Join degree with vertex info
+hub_df2 <- hub_df2 %>%
+  select(Gene = label, Degree = degree) %>%
+  arrange(desc(Degree))
 
 # View top 10 hubs
 head(hub_df2, 10)
 
+
 ```
 
 ```{r}
-# Compute degree (number of connections) for each node using g2
-deg_cent <- degree(g2, mode = "all")
+library(igraph)
+library(dplyr)
 
-# Betweenness centrality using g2
-betw_cent <- betweenness(g2)
-
-# Closeness centrality using g2
+# 1. Compute centrality measures
+deg_cent   <- degree(g2, mode = "all")
+betw_cent  <- betweenness(g2)
 close_cent <- closeness(g2)
 
-# Create a data.frame for centrality metrics and attach gene labels
+# 2. Create a vertex info table
+vertex_info <- data.frame(
+  STRING_id = V(g2)$name,
+  label     = V(g2)$label
+)
+
+# 3. Combine centrality with gene info, drop STRING_id
 centrality_df <- data.frame(
   STRING_id   = names(deg_cent),
   degree      = deg_cent,
   betweenness = betw_cent,
   closeness   = close_cent
 ) %>%
-  left_join(
-    as_data_frame(g2, what = "vertices") %>% select(name, label),
-    by = c("STRING_id" = "name")
-  )
+  left_join(vertex_info, by = "STRING_id") %>%
+  select(Gene = label, degree, betweenness, closeness)
 
-# View the top 10 nodes by betweenness (potential bottlenecks)
-centrality_df %>% arrange(desc(betweenness)) %>% head(10)
+# 4. Top 10 nodes by betweenness centrality
+centrality_df %>%
+  arrange(desc(betweenness)) %>%
+  head(10)
+
 
 ```
 
@@ -1067,7 +754,7 @@ entrez_map_hubs2 <- bitr(
   OrgDb    = org.Hs.eg.db,
   drop     = TRUE
 )
-S
+
 # Inspect mapping
 print(entrez_map_hubs2)
 ```
@@ -1096,18 +783,6 @@ barplot(ego_hubs2, showCategory = 5, title = "GO BP Enrichment of Hub Proteins")
 
 ```
 
-```{r}
-  dp2 <- dotplot(
-    ego_hubs2,
-    showCategory = min(8, nrow(ego_hubs2))
-  )
-  
-  # Add title via ggtitle
-  dp2 <- dp2 + ggtitle("GO BP Enrichment of Hub Proteins")
-  
-  # Display the plot
-  print(dp2)
-```
 
 ```{r}
 # 1. Load libraries
@@ -1161,7 +836,7 @@ if(nrow(kegg_df2) == 0){
   kegg_df2 <- as.data.frame(kegg_res2)
   
   # 8. Create a dotplot without the title parameter first, then add the title using ggplot2
-  dp <- dotplot(
+  dp <- barplot(
     kegg_res2,
     showCategory = min(8, nrow(kegg_df2))
   )
@@ -1172,289 +847,6 @@ if(nrow(kegg_df2) == 0){
   # Display the plot
   print(dp)
 }
-
-```
-
-```{r}
-  bp <- barplot(
-    kegg_res2,
-    showCategory = min(8, nrow(kegg_df2))
-  )
-  
-  # Optionally add a title using ggplot2 functions:
-  bp <- bp + ggtitle("KEGG Pathway Enrichment of Hub Proteins")
-  
-  # 9. Display the bar plot
-  print(bp)
-
-```
-
-
-
-
-
-```{r}
-# Assume your dataset is called df
-df <- read.csv("finalize_table1_unique.csv")  
-
-# Separate predictors and target
-features <- df[, c("LOGFC", "AVEEXPR", "T", "P.VALUE", "ADJ.P.VAL")]
-target <- as.factor(df$CONDITION)
-
-```
-
-```{r}
-library(randomForest)
-rf_model <- randomForest(x = features, y = target, ntree = 100)
-```
-
-```{r}
-# Wrapper function for predictions
-pred_fun <- function(object, newdata) {
-  predict(object, newdata = newdata, type = "prob")[, 2]
-}
-
-```
-
-```{r}
-set.seed(123)  # For reproducibility
-train_index <- sample(1:nrow(df), 0.7 * nrow(df))  # 70% for training
-train_data <- df[train_index, ]
-test_data <- df[-train_index, ]
-
-# Separate features and target for testing data
-test_features <- test_data[, c("LOGFC", "AVEEXPR", "T", "P.VALUE", "ADJ.P.VAL")]
-test_target <- as.factor(test_data$CONDITION)
-
-
-```
-
-```{r}
-features_train <- train_data[, c("LOGFC", "AVEEXPR", "T", "P.VALUE", "ADJ.P.VAL")]
-target_train <- as.factor(train_data$CONDITION)
-
-library(randomForest)
-rf_model <- randomForest(x = features_train, y = target_train, ntree = 100)
-
-```
-
-```{r}
-predictions <- predict(rf_model, newdata = test_features, type = "class")  # Class-level predictions
-
-```
-
-```{r}
-library(caret)
-confusionMatrix(predictions, test_target)
-
-```
-
-```{r}
-probs <- predict(rf_model, newdata = test_features, type = "prob")[, 2]  # Probability for class 2
-
-```
-
-```{r}
-library(pROC)
-roc_curve <- roc(test_target, probs)
-plot(roc_curve, col = "blue", main = "AUC-ROC Curve")
-auc(roc_curve)
-
-```
-
-
-```{r}
-# install & load
-#install.packages("fastshap")
-library(fastshap)
-
-# define a prediction wrapper that returns the probability of the positive class
-pred_fun <- function(object, newdata) {
-  predict(object, newdata, type = "prob")[ ,2]
-}
-
-# compute SHAP values
-set.seed(123)  # for reproducibility
-shap_values <- fastshap::explain(
-  object       = rf_model,
-  X            = features,
-  pred_wrapper = pred_fun,
-  nsim         = 100
-)
-
-# inspect the first few rows
-head(shap_values)
-
-```
-
-```{r}
-# compute mean absolute shap per feature
-imp <- apply(abs(shap_values), 2, mean)
-
-# turn into a data.frame and sort
-imp_df <- data.frame(
-  feature = names(imp),
-  mean_abs_shap = as.numeric(imp)
-)
-imp_df <- imp_df[order(imp_df$mean_abs_shap, decreasing = TRUE), ]
-
-print(imp_df)
-
-```
-
-```{r}
-library(ggplot2)
-
-ggplot(imp_df, aes(x = reorder(feature, mean_abs_shap), y = mean_abs_shap)) +
-  geom_col() +
-  coord_flip() +
-  labs(
-    x = "Feature",
-    y = "Mean |SHAP value|",
-    title = "Global Feature Importance (SHAP)"
-  )
-
-```
-
-
-```{r}
-# install.packages("ggbeeswarm")  # once
-library(ggbeeswarm)
-library(ggplot2)
-
-```
-
-```{r}
-# reshape: one row per (observation, feature)
-library(tidyr)
-shap_long <- as.data.frame(shap_values) %>%
-  mutate(.obs = seq_len(n())) %>%
-  pivot_longer(
-    cols = - .obs,
-    names_to  = "feature",
-    values_to = "shap_value"
-  )
-
-# add the original feature value
-shap_long$feature_value <- purrr::map2_dbl(
-  shap_long$.obs,
-  shap_long$feature,
-  ~ features[.x, .y]
-)
-
-# beeswarm: x = shap_value, y = feature
-ggplot(shap_long, aes(x = shap_value, y = feature, color = feature_value)) +
-  ggbeeswarm::geom_quasirandom(alpha = 0.6, size = 1.5) +
-  scale_color_viridis_c(option = "D") +
-  labs(
-    title = "SHAP Summary (Beeswarm)",
-    x = "SHAP value",
-    y = NULL,
-    color = "Feature\nvalue"
-  )
-
-```
-
-```{r}
-png(
-  filename = "shap_beeswarm.png",
-  width    = 8,
-  height   = 8,
-  units    = "in",
-  res      = 300
-)
-
-# 2. Re-draw your beeswarm plot
-library(ggplot2)
-library(ggbeeswarm)
-library(viridis)
-# (Assuming shap_long is already in your environment)
-
-ggplot(shap_long, aes(x = shap_value, y = feature, color = feature_value)) +
-  geom_quasirandom(alpha = 0.6, size = 1.5) +
-  scale_color_viridis_c(option = "D") +
-  labs(
-    title = "SHAP Summary (Beeswarm)",
-    x     = "SHAP value",
-    y     = NULL,
-    color = "Feature\nvalue"
-  )
-
-# 3. Close the device to write the file
-dev.off()
-```
-
-```{r}
-
-top1 <- imp_df$feature[1]
-df_dep <- data.frame(
-  feat_val = features[[top1]],
-  shap_val = shap_values[, top1]
-)
-
-ggplot(df_dep, aes(x = feat_val, y = shap_val, color = feat_val)) +
-  geom_point(alpha = 0.7, size = 2) +
-  scale_color_viridis_c(option = "D") +
-  labs(
-    x     = top1,
-    y     = "SHAP value",
-    color = paste(top1, "value"),
-    title = paste("Dependence Plot for", top1)
-  ) +
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title    = element_text(face = "bold", hjust = 0.5),
-    axis.title    = element_text(face = "bold"),
-    legend.title  = element_text(face = "bold")
-  )
-
-```
-
-```{r}
-library(ggforce)  # for geom_sankey / waterfall if desired
-# or just a sorted bar:
-obs5 <- sort(shap_values[5, ], decreasing = TRUE)
-obs5_df <- data.frame(feature = names(obs5), shap = as.numeric(obs5))
-ggplot(obs5_df, aes(x = reorder(feature, shap), y = shap, fill = shap > 0)) +
-  geom_col() + coord_flip() + scale_fill_manual(values = c("TRUE" = "steelblue", "FALSE" = "salmon"), guide = FALSE) +
-  labs(title = "SHAP Waterfall for Observation 5", x = NULL, y = "SHAP value")
-
-```
-
-```{r}
-# 1. Combine your original metadata (df) with the SHAP matrix
-df_shap <- cbind(df, shap_values)
-
-# 2. Compute a per‐gene importance score: sum of absolute SHAP across all predictors
-df_shap$shap_importance <- rowSums(abs(shap_values))
-
-# 3. View the top genes by SHAP importance
-top_genes <- df_shap[
-  order(df_shap$shap_importance, decreasing = TRUE),
-  c("SYMBOL", "GENENAME", "shap_importance", "CONDITION")
-]
-head(top_genes, 10)
-
-
-```
-
-```{r}
-# build a slim data.frame
-df_plot <- data.frame(
-  Condition = factor(df_shap$CONDITION),
-  Importance = df_shap$shap_importance
-)
-
-# now this will work
-library(ggplot2)
-ggplot(df_plot, aes(x = Condition, y = Importance)) +
-  geom_boxplot(fill = "steelblue", alpha = 0.6) +
-  labs(
-    x     = "Condition",
-    y     = "Sum of |SHAP values|",
-    title = "Per-gene SHAP importance by Condition"
-  ) +
-  theme_minimal(base_size = 14)
 
 ```
 
